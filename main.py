@@ -95,7 +95,10 @@ def add_multiplication(data_lines):
 def add_minor(data_lines):
     for line in data_lines:
         a, b, c = float(line[-4]), float(line[-3]), float(line[-2])
-        total = (c + (b / 2.0)) / float(a + b + c)
+        if (a+b+c) == 0:
+            total = 0
+        else:
+            total = (c + (b / 2.0)) / float(a + b + c)
         line.append(f"{total:.2f}".encode())
 
 
@@ -128,12 +131,12 @@ def flatten_linkage(first_sample_index, linkage_lines):
             if len(line[i]) > 0:
                 counters[int(line[i]) - 1] += 1
         total = sum(counters)
-        for i, val in filter(lambda x: x[1] > total / 2.0, enumerate(counters)):
-            flat.append(str(i + 1).encode())
+        for j, val in filter(lambda x: x[1] > total / 2.0, enumerate(counters)):
+            flat.append(str(j + 1).encode())
             break
         else:
             flat.append(b"")
-
+            
     return flat
 
 
@@ -167,6 +170,8 @@ def t_diff(lines, src, dst, filt, sample_index):
         res.append(abs(int(lines[i][src]) - int(lines[i][dst])))
     if len(res) < filt:
         return ""
+    if len(res) == 0:
+        return ""
     return "{:.5f}".format(sum(res) / float(len(res)))
 
 
@@ -197,6 +202,37 @@ def pearsons_diff(lines, src, dst, filt, sample_index):
         ):
             continue
         res.append(PEARSONS_DISTANCE_MAP[(int(lines[i][src]), int(lines[i][dst]))])
+    if len(res) < filt:
+        return ""
+    return "{:.5f}".format(sum(res) / float(len(res)))
+
+
+YT_SIMILARITY_MAP = {
+    (1, 1): 1,
+    (2, 2): 1,
+    (3, 3): 1,
+    (1, 2): 0.5,
+    (2, 1): 0.5,
+    (3, 2): 0.5,
+    (2, 3): 0.5,
+    (1, 3): 0,
+    (3, 1): 0,
+}
+
+def yt_similarity(lines, src, dst, filt, sample_index):
+    name = lines[0][src]
+    res = []
+    for i in range(1, len(lines)):
+        if (
+            len(lines[i][src]) == 0
+            or len(lines[i][dst]) == 0
+            or lines[i][src] == b"--"
+            or lines[i][dst] == b"--"
+            or lines[i][dst] == b"./."
+            or lines[i][src] == b"./."
+        ):
+            continue
+        res.append(YT_SIMILARITY_MAP[(int(lines[i][src]), int(lines[i][dst]))])
     if len(res) < filt:
         return ""
     return "{:.5f}".format(sum(res) / float(len(res)))
@@ -338,7 +374,8 @@ def filter_lines(snip_filter, sample_filter, input_vcf, limit):
 @click.option("--limit", "-l", type=int, default=None)
 @click.option("--pearson", "-p", is_flag=True, default=False)
 @click.option("--morisita", "-m", is_flag=True, default=False)
-def distances(input_vcf, limit, pearson, morisita):
+@click.option("--yt-sim", "-y", is_flag=True, default=True)
+def distances(input_vcf, limit, pearson, morisita, yt_sim):
     """
     Calculates distance table for each sample by sample
 
@@ -361,6 +398,9 @@ def distances(input_vcf, limit, pearson, morisita):
     elif pearson:
         print("Doing Pearson's™ distance")
         distances = calculate_distances(parsed_data, pearsons_diff)
+    elif yt_sim:
+        print("Doing YT similarity ©")
+        distances = calculate_distances(parsed_data, yt_similarity)
     else:
         print("Doing Yaron's™ distance")
         distances = calculate_distances(parsed_data)
@@ -369,6 +409,8 @@ def distances(input_vcf, limit, pearson, morisita):
         out_path = out_path.with_name(out_path.name + "_morisita_distances.csv")
     elif pearson:
         out_path = out_path.with_name(out_path.name + "_pearson_distances.csv")
+    elif yt_sim:
+        out_path = out_path.with_name(out_path.name + f"_yt_similarity.csv")
     else:
         out_path = out_path.with_name(out_path.name + "_distances.csv")
     out = out_path.open("wb")
@@ -384,6 +426,108 @@ def distances(input_vcf, limit, pearson, morisita):
         out.write(line.encode())
     out.close()
 
+
+CHROME_NAME_MAP = {
+b"NC_057849.1": b'1',
+b"NC_057850.1": b'2',
+b"NC_057851.1": b'3',
+b"NC_057852.1": b'4',
+b"NC_051245.2": b'5',
+b"NC_051246.2": b'6',
+b"NC_057853.1": b'7',
+b"NC_057854.1": b'8',
+b"NC_057855.1": b'9',
+b"NC_051250.2": b'10',
+b"NC_051251.2": b'11',
+b"NC_051252.2": b'12',
+b"NC_051253.2": b'13',
+b"NC_051254.2": b'14',
+b"NC_057856.1": b'15',
+b"NC_057857.1": b'16',
+b"NC_051257.2": b'17',
+b"NC_051258.2": b'18',
+b"NC_051259.2": b'19',
+b"NC_051260.2": b'20',
+b"NC_051261.2": b'21',
+b"NC_051262.2": b'22',
+b"NC_051263.2": b'23',
+b"NC_051264.2": b'24',
+b"NC_057858.1": b'25',
+b"NC_057859.1": b'26',
+b"NC_057860.1": b'27',
+b"NC_051268.2": b'28',
+b"NW_025111273.1": b"MT"}
+
+
+def split_data_by_chromosome(parsed_data):
+    split_data = {}
+    for row in parsed_data:
+        ch = row[0]
+        name = CHROME_NAME_MAP.get(ch, ch)
+        split_data.setdefault(name, []).append(row)
+    return split_data
+
+@cli.command()
+@click.option("--input_vcf", "-i", type=click.File("rb"), default=None)
+@click.option("--limit", "-l", type=int, default=None)
+@click.option("--pearson", "-p", is_flag=True, default=False)
+@click.option("--morisita", "-m", is_flag=True, default=False)
+@click.option("--yt-sim", "-y", is_flag=True, default=True)
+def split_distances(input_vcf, limit, pearson, morisita, yt_sim):
+    """
+    Calculates distance table for each sample by sample, split by chromosome
+
+    input_vcf : The vcf file to process.
+    """
+    if input_vcf is None:
+        root = tk.Tk()
+        root.withdraw()
+        file_path = filedialog.askopenfilename()
+        input_vcf = click.File("rb")(file_path)
+    all_data = input_vcf.read()
+    all_lines = all_data.split(b"\n")
+    parsed_data = [l.split(b"\t")[:-5] for l in all_lines[:limit]]
+    parsed_data.pop()
+    header_line = parsed_data.pop(0)
+    split_data = split_data_by_chromosome(parsed_data)
+    for ch, parsed_data in split_data.items():
+        print(f"Working on Chromosome: {ch.decode()}")
+        parsed_data.insert(0, header_line)
+        if pearson and morisita:
+            print("Can't do both Pearson's and Morisita's at the same time, please only choose one (-p/-m)")
+        elif morisita:
+            print("Doing Morisita's™ distance")
+            distances = calculate_distances(parsed_data, morisitas_diff)
+        elif pearson:
+            print("Doing Pearson's™ distance")
+            distances = calculate_distances(parsed_data, pearsons_diff)
+        elif yt_sim:
+            print("Doing YT similarity ©")
+            distances = calculate_distances(parsed_data, yt_similarity)
+        else:
+            print("Doing Yaron's™ distance")
+            distances = calculate_distances(parsed_data)
+        out_path = Path(input_vcf.name)
+        if morisita:
+            out_path = out_path.with_name(out_path.name + f"_{ch.decode()}_morisita_distances.csv")
+        elif pearson:
+            out_path = out_path.with_name(out_path.name + f"_{ch.decode()}_pearson_distances.csv")
+        elif yt_sim:
+            out_path = out_path.with_name(out_path.name + f"_{ch.decode()}_yt_similarity.csv")
+        else:
+            out_path = out_path.with_name(out_path.name + f"_{ch.decode()}_distances.csv")
+        out = out_path.open("wb")
+        first_line = ",".join(name.decode() for name in distances.keys())
+        first_line = "," + first_line
+        first_line += "\r\n"
+        out.write(first_line.encode())
+
+        for name, v in distances.items():
+            line = name.decode() + ","
+            line += ",".join(str(x) for x in v)
+            line += "\r\n"
+            out.write(line.encode())
+        out.close()
 
 @cli.command()
 @click.option("--input_vcf", "-i", type=click.File("rb"), default=None)
